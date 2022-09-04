@@ -1,0 +1,40 @@
+(defpackage :cl-libpff-test
+  (:use #:cl #:libpff-ffi #:plus-c))
+
+(in-package :cl-libpff-test)
+
+(defparameter *test-pst-file* "/mnt/c/Users/mille/Documents/Outlook Files/Outlook1.pst")
+
+(defun test-version ()
+  (libpff-get-version))
+
+(defun test-file-signature ()
+  (let ((fname "/mnt/c/Users/mille/Documents/Outlook Files/Outlook1.pst")
+        (invalid-fname "/home/millejoh/Dropbox/20170627 Scarlett DS11_Complete.pdf"))
+    (if (= 1 (libpff-check-file-signature fname (cffi:null-pointer)))
+        (format t "~A is a valid PFF datafile.~%" fname)
+        (warn "Something isn't right with signature of ~A.~%" fname))
+    (if (= 1 (libpff-check-file-signature invalid-fname (cffi:null-pointer)))
+        (format t "~A is a valid PFF datafile.~%" fname)
+        (warn "Something isn't right with signature of ~A.~%" fname))))
+
+(defun test-initialize-file ()
+  (let ((f (cffi:null-pointer)))
+    (print (libpff-file-initialize f (cffi:null-pointer)))
+    (print (libpff-file-free f (cffi:null-pointer)))))
+
+(defun test-open-pst ()
+  (c-let ((f libpff-ffi::libpff-file-t :value (cffi:null-pointer))
+          (e libpff-ffi::libpff-error-t)
+          (size :int))
+    (print (libpff-ffi::libpff-file-initialize (f &) (e &)))
+    (libpff-ffi::libpff-error-free (e &))
+    (print (libpff-ffi::libpff-file-open (f &) *test-pst-file* 0 (e &)))
+    (libpff-ffi::libpff-error-free (e &))
+    (print (libpff-ffi::libpff-file-get-size (f &) (size &) (e &)))
+    (libpff-ffi::libpff-error-free (e &))
+    (print size)
+    (print (libpff-ffi::libpff-file-close (f &) (e &)))
+    (libpff-ffi::libpff-error-free (e &))
+    (print (libpff-ffi::libpff-file-free (f &) (e &)))
+    (libpff-ffi::libpff-error-free (e &))))
