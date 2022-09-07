@@ -4,7 +4,7 @@
 (in-package :cl-libpff-test)
 
 (defparameter *test-pst-file-1* "/mnt/c/Users/mille_9b1cm14/OneDrive/Documents/Outlook Files/test.pst")
-(defparameter *test-pst-file-2* "/mnt/c/Users/mille_9b1cm14/AppData/Local/Microsoft/Outlook/johnpantagruel@gmail.com.ost")
+(defparameter *test-pst-file-2* "/mnt/c/Users/mille/AppData/Local/Microsoft/Outlook/johnpantagruel@gmail.com.ost")
 
 (defun test-version ()
   (libpff-get-version))
@@ -59,54 +59,63 @@
 (defclass pst-store (pst-object)
   ((source :accessor pst-store-source :initarg :source)
    (type :reader pst-store-type :initform 0)
-   (root-folder :reader pst-store-root-folder :initform (make-t-pointer))
-   (message-store :reader pst-store-message-store :initform (make-t-pointer))
    (size :reader pst-store-size :initform 0)))
 
 (defclass item (pst-object)
   ((id :reader pst-item-id :initform 0)
-   (subitem-count :reader pst-)))
+   (subitem-count :reader pst-subitem-count)))
 
-
-(defmacro define-libpff-accessor (object-type accessor return-type)
-  (let ((ffi-accessor-fn (intern (format nil "LIBPFF-~A-GET-~A" object-type accessor)))
-        (accessor-fn (intern (format nil "_GET-~S-~S" object-type accessor))))
-    `(defun ,accessor-fn (ptr)
-       (c-let ((rval ,return-type))
-
-         (let ((result (,ffi-accessor-fn ptr (rval &) +default-error+)))
-
-           (values (rval *) result))))))
-
-(define-libpff-accessor item identifier :unsigned-int)
-(define-libpff-accessor item number-of-entries :unsigned-int)
-(define-libpff-accessor item number-of-sub-items :unsigned-int)
-(define-libpff-accessor item type :unsigned-char)
-(define-libpff-accessor file size :int)
-(define-libpff-accessor file type :unsigned-char)
-(define-libpff-accessor file content-type :unsigned-char)
-(define-libpff-accessor folder type ::unsigned-char)
-(define-libpff-accessor folder utf8-name-size :int)
-(define-libpff-accessor folder utf16-name-size :int)
-(define-libpff-accessor folder number-of-sub-folders :int)
+(defclass folder (item)
+  ((name :reader folder-name :initform nil)))
 
 (defmethod initialize-instance :after ((store pst-store) &key &allow-other-keys)
   (with-slots (handle source type size root-folder message-store) store
     (format t  "~A" source)
     (libpff-file-initialize handle (cffi:null-pointer))
-    (when (probe-file source)
-      (c-let ((handle :pointer :ptr handle)
-              (rtype :unsigned-char)
-              (rsize :int))
-        (when (libpff-file-open handle source 1 +default-error+)
-          (libpff-file-get-content-type handle (rtype &) +default-error+)
-          (libpff-file-get-size handle (rsize &) +default-error+)
-          (libpff-file-get-root-folder handle root-folder +default-error+)
-          (libpff-file-get-message-store handle message-store +default-error+)
-          (setf type rtype
-                size rsize))))))
+    (c-let ((handle :pointer :ptr handle))
+      (unless (= 1 (libpff-file-open handle source +libpff-open-read+ +default-error+))
+        (error "libpff: Could not open file ~A." source)))))
+
+(defmethod get-type ((folder folder))
+  (with-slots (handle) folder
+    (c-let ((handle :pointer :ptr handle)
+            (type :int))
+      (let ((ret (libpff-folder-get-type handle (type &) +default-error+)))
+        (values type ret)))))
+
+(defmethod get-name ((folder folder))
+  (with-slots (handle) folder
+    (c-let ((handle :pointer :ptr handle)
+            (string-size :int)
+            (name :pointer))
+      (let* ((ret1 (libpff-folder-get-utf8-name-size handle (string-size &) +default-error+))
+             (ret2 (libpff-folder-get-utf8-name handle (name &) string-size +default-error+)))
+        (if (= 1 ret1 ret2)
+            (cffi:foreign-string-to-lisp (name &) :count (1- string-size))
+            (warn "Could not get folder's name."))))))
+
+(defmethod get-root-folder ((store pst-store))
+  (with-slots (handle) store
+    (c-let ((handle :pointer :ptr handle))
+      (let* ((folder (make-instance 'folder))
+             (rtval (libpff-file-get-root-folder handle (pst-handle folder) +default-error+)))
+        (values folder rtval)))))
+
+(defmethod subitem-count ((f folder))
+  (with-slots (handle) f
+    (c-let ((handle :pointer :ptr handle)
+            (icnt :int))
+      (let ((ret (libpff-folder-get-number-of-sub-folders handle (icnt &) +default-error+)))
+        (values icnt ret)))))
+
+(defmethod get-subitem-by-index ((f folder) idx)
+  (with-slots (handle) f
+    (c-let ((handle :pointer :ptr handle))
+      (let* ((subfolder (make-instance 'folder))
+             (ret (libpff-folder-get-sub-folder handle idx (pst-handle subfolder) +default-error+)))
+        (values subfolder ret)))))
 
 (defun new-test-store (&optional (filename *test-pst-file-1*))
   (unless (probe-file filename)
     (error "File does not exist: ~A." filename))
-  (make-instance 'pst-store :source *test-pst-file-1*))
+  (make-instance 'pst-store :source filename))
